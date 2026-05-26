@@ -1,0 +1,107 @@
+# Proposal: Set Middle Position for ST3215 Servos
+
+**Status:** Draft 
+**Author:** Joel Shprentz
+**Created:** 2026-05-26
+
+---
+
+## Summary
+
+Add a function to set the middle position of an ST3215 servo.
+
+---
+
+## Motivation
+
+ST3215 servos report their postion on a scale of 0 to 4095 steps. The servos accept position commands with the same scale. The `feetech` library converts steps to and from radians.
+
+To ease integration into robots and other mechanical systems, ST3215 servos accept a calibration command to designate the current position as step 2048, the middle of the range.
+
+The calibration command is implemented by writing `128` to a servo's `torque_enable` register (40). The servo recalculates and updates the value of its `position_offset` register (31). The servo uses its `position_offset` to accept and report positions relative to the absolute positions returned by its magnetic encoder.
+
+The `Feetech.ControlTable.STS3215` module defines `torque_enable` as a boolean register. As such, the value `128` cannot be passed through the `Feetech.write/5` function to the servo.
+
+In the absence of a `Feetech` library function to set the middle position, library users will repeatedly implement that function by calling `Feetech.write_raw/5` with the magic number `128`.
+
+---
+
+## Design
+
+``` elixir
+  def set_middle_position(pid, servo_id) do
+    Feetech.write_raw(pid, servo_id, :torque_enable, 128)
+  end
+```
+
+### Example
+Developed and tested in Livebook:
+``` elixir
+defmodule Middler do
+  def set_middle_position(pid, servo_id) do
+    Feetech.write_raw(pid, servo_id, :torque_enable, 128)
+  end
+
+  def report(pid, servo_id) do
+    with {:ok, present_position} = Feetech.read_raw(pid, servo_id, :present_position),
+         {:ok, position_offset} = Feetech.read_raw(pid, servo_id, :position_offset),
+         {:ok, torque_enable} = Feetech.read_raw(pid, servo_id, :torque_enable) do
+      IO.puts("present_position: #{present_position}")
+      IO.puts("position_offset: #{position_offset}")
+      IO.puts("torque_enable: #{torque_enable}")
+    end
+  end
+
+  def log_set_middle_position(pid, servo_id) do
+    IO.puts("Before")
+    report(pid, servo_id)
+    
+    :ok = set_middle_position(pid, servo_id)
+    
+    IO.puts("\nAfter")
+    report(pid, servo_id)
+  end
+end
+
+Middler.log_set_middle_position(pid, 1)
+```
+When executed, the `position_offset` register value changes, but the `torque_enable` value does not. The servo does not rotate.
+```
+Before
+present_position: 1300
+position_offset: 3419
+torque_enable: 0
+
+After
+present_position: 2048
+position_offset: 1977
+torque_enable: 0
+```
+---
+
+## Acceptance Criteria
+
+What must be true for this to be considered complete?
+
+### Must Have
+- [ ] Implementation
+- [ ] Documentation
+
+### Should Have
+- [ ] Integration test
+
+### Won't Have
+
+---
+
+## Open Questions
+
+Where does the `set_middle_position` function belong? Is integration with other Beam-Bots libraries needed?
+
+---
+
+## References
+
+The [ST3215 Memory Table Parsing -V3.7 spreadsheet](https://files.waveshare.com/upload/2/27/ST3215%20memory%20register%20map-EN.xls) documents the special meaning of `128` in the `torque enable` register in the *Value Parsing* column for memory address 40. The spreadsheet is linked from the first FAQ in [Waveshare's ST3215 Servo wiki page](https://www.waveshare.com/wiki/ST3215_Servo).
+
+The [Vassar Feetech Servo SDK](https://github.com/vassar-robotics/feetech-servo-sdk) provides a Python implementation of [`set_middle_position`](https://github.com/vassar-robotics/feetech-servo-sdk/blob/d60242c8e1d17ffc97ea5723e1256a5def86414f/vassar_feetech_servo_sdk/controller.py#L453)
